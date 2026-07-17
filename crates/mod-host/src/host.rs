@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     ffi::CString,
     fmt::Debug,
     marker::Tuple,
@@ -10,6 +9,8 @@ use std::{
 };
 
 use closure_ffi::traits::FnPtr;
+use eyre::Context;
+use indexmap::IndexMap;
 use libloading::{Library, Symbol};
 use me3_launcher_attach_protocol::AttachConfig;
 use me3_mod_protocol::{native::NativeInitializerCondition, Game, ModProfile};
@@ -28,12 +29,20 @@ pub mod hook;
 
 static ATTACHED_INSTANCE: OnceLock<ModHost> = OnceLock::new();
 
+#[derive(Default, Debug)]
+struct PropertyOverrides {
+    /// Property overrides specified by the user (via the attach config).
+    user: IndexMap<CString, CString>,
+    /// Property overrides defined internally by me3.
+    internal: IndexMap<CString, CString>,
+}
+
 #[derive(Default)]
 pub struct ModHost {
     hooks: Mutex<Vec<Arc<UntypedDetour>>>,
     native_modules: Mutex<Vec<Library>>,
     profiles: Vec<ModProfile>,
-    property_overrides: Mutex<HashMap<Vec<u16>, bool>>,
+    property_overrides: Mutex<PropertyOverrides>,
     pub disable_arxan: bool,
 }
 
@@ -50,13 +59,24 @@ impl Debug for ModHost {
 #[allow(unused)]
 impl ModHost {
     #[inline]
-    pub fn new(attach_config: &AttachConfig) -> Self {
+    pub fn new(attach_config: &AttachConfig) -> eyre::Result<Self> {
         // Unconditionally disable Arxan in Dark Souls 3.
         let disable_arxan = attach_config.disable_arxan || attach_config.game == Game::DarkSouls3;
-        Self {
-            disable_arxan,
-            ..Default::default()
+
+        let mut property_overrides = PropertyOverrides::default();
+        for (name, value) in &attach_config.property_overrides {
+            let name = CString::new(name.as_str())
+                .wrap_err_with(|| format!("nul byte in game property name: {:?}", name))?;
+            let value = CString::new(value.as_str())
+                .wrap_err_with(|| format!("nul byte in game property value: {:?}", value))?;
+            property_overrides.user.insert(name, value);
         }
+
+        Ok(Self {
+            disable_arxan,
+            property_overrides: Mutex::new(property_overrides),
+            ..Default::default()
+        })
     }
 
     pub fn load_native(
@@ -127,10 +147,20 @@ impl ModHost {
         HookInstaller::new(target).on_install(|hook| self.hooks.lock().unwrap().push(hook))
     }
 
-    pub fn override_game_property<S: AsRef<str>>(&self, property: S, state: bool) {
+    pub fn override_game_property(
+        &self,
+        property: impl AsRef<str>,
+        value: impl AsRef<str>,
+    ) -> eyre::Result<()> {
+        let property = CString::new(property.as_ref()).wrap_err("Nul byte in property key")?;
+        let value = CString::new(value.as_ref()).wrap_err("Nul byte in property value")?;
+
         self.property_overrides
             .lock()
-            .unwrap()
-            .insert(property.as_ref().encode_utf16().collect(), state);
+            .expect("poisoned")
+            .internal
+            .insert(property, value);
+
+        Ok(())
     }
 }

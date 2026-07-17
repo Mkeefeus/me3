@@ -5,11 +5,13 @@ use package::Package;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+pub mod debug_properties;
 pub mod dependency;
 pub mod game;
 pub mod native;
 pub mod package;
 
+use debug_properties::DebugProperties;
 pub use game::Game;
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -110,9 +112,26 @@ impl ModProfile {
         }
     }
 
-    pub fn patch_mem(&self) -> Option<bool> {
+    pub fn mem_patch(&self) -> Option<bool> {
         match self {
-            ModProfile::V1(v1) => v1.patch_mem,
+            ModProfile::V1(v1) => v1.mem_patch,
+        }
+    }
+
+    pub fn mem_patch_heap_size(&self) -> Option<u32> {
+        match self {
+            ModProfile::V1(v1) => v1.mem_patch_heap_size,
+        }
+    }
+
+    pub fn debug_properties(&self) -> Vec<(String, String)> {
+        match self {
+            ModProfile::V1(v1) => v1
+                .debug_properties
+                .props
+                .iter()
+                .map(|(k, v)| (k.clone(), v.to_string()))
+                .collect(),
         }
     }
 }
@@ -148,7 +167,17 @@ pub struct ModProfileV1 {
 
     /// Patch memory limits for supported games to improve mod stability.
     #[serde(default)]
-    patch_mem: Option<bool>,
+    #[serde(alias = "patch_mem")]
+    mem_patch: Option<bool>,
+
+    /// Override how many megabytes of memory the supported game should allocate
+    /// (with `mem_patch = true`).
+    #[serde(default)]
+    mem_patch_heap_size: Option<u32>,
+
+    /// Debug game property overrides.
+    #[serde(default)]
+    debug_properties: DebugProperties,
 }
 
 #[cfg(test)]
@@ -181,5 +210,10 @@ mod tests {
     #[test]
     fn singular_packages_name() {
         check("singular_package.me3");
+    }
+
+    #[test]
+    fn debug_properties() {
+        check("debug_properties.me3");
     }
 }

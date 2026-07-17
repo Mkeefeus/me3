@@ -16,13 +16,14 @@ sentry = ["me3-telemetry/sentry"]
 crate-type = ["cdylib"]
 
 [dependencies]
+indexmap.workspace = true
 closure-ffi = { version = "5.0", features = ["coverage", "std", "tuple_trait"] }
 color-eyre.workspace = true
 dearxan = "0.5.2"
 eyre = { workspace = true, default-features = false, features = ["track-caller"] }
 from-singleton.workspace = true
 libloading = "0.9.0"
-libmimalloc-sys = { version = "0.1.44", features = ["v3", "extended"] }
+libmimalloc-sys = { version = "0.1.49", features = ["extended", "arena"] }
 me3-binary-analysis.workspace = true
 me3-env.workspace = true
 me3-ipc.workspace = true
@@ -41,6 +42,7 @@ serde_json.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+memchr.workspace = true
 windows = { workspace = true, features = [
     "Wdk_System_Threading",
     "Win32_Graphics_Gdi",
@@ -56,7 +58,7 @@ windows = { workspace = true, features = [
     "Win32_System_Threading",
     "Win32_UI_WindowsAndMessaging",
 ] }
-xxhash-rust = { version = "0.8", features = ["std", "xxh3"] }
+xxhash-rust.workspace = true
 pkcs1 = { version = "0.7.5", features = ["std"] }
 base64 = "0.22.1"
 miniz_oxide = { version = "0.9.0", features = ["std"] }

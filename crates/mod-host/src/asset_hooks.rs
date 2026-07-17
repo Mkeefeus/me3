@@ -11,7 +11,7 @@ use std::{
 };
 
 use base64::{prelude::BASE64_STANDARD, Engine};
-use eyre::{eyre, OptionExt};
+use eyre::{eyre, Context, OptionExt};
 use me3_binary_analysis::{fd4_step::Fd4StepTables, rtti::ClassMap};
 use me3_launcher_attach_protocol::AttachConfig;
 use me3_mod_host_assets::{
@@ -79,9 +79,11 @@ fn enable_loose_params(attach_config: &AttachConfig, mapping: &VfsOverrideMappin
 
     if LOOSE_PARAM_FILES
         .iter()
-        .any(|file| mapping.vfs_override(file).is_some())
+        .any(|file| mapping.virtual_to_disk(file).is_some())
     {
-        ModHost::get_attached().override_game_property("Game.Debug.EnableRegulationFile", false);
+        ModHost::get_attached()
+            .override_game_property("Game.Debug.EnableRegulationFile", "false")
+            .unwrap();
     }
 }
 
@@ -103,13 +105,13 @@ fn hook_file_init(
     ModHost::get_attached()
         .hook(init_fn)
         .with_span(info_span!("hook"))
-        .with_closure(move |p1, trampoline| {
+        .with_closure(move |p1, p2, trampoline| {
             let result = hook_device_manager(exe, mapping.clone())
                 .and_then(|_| hook_mount_ebl(attach_config.clone(), exe))
                 .inspect_err(|e| error!("error" = &**e, "failed apply pre-hooks"));
 
             unsafe {
-                trampoline(p1);
+                trampoline(p1, p2);
             }
 
             if result.is_ok()
@@ -144,7 +146,7 @@ fn hook_ebl_utility(
             let expanded = unsafe { device_manager.expand_path(path.as_wide()) };
 
             if mapping
-                .vfs_override(OsString::from_wide(&expanded))
+                .virtual_to_disk(OsString::from_wide(&expanded))
                 .is_some()
             {
                 return None;
@@ -177,7 +179,7 @@ fn hook_device_manager(
             let path = path.get().ok()?;
             let expanded = DlDeviceManager::lock(device_manager).expand_path(path.as_slice());
 
-            let mapped_override = mapping.vfs_override(OsString::from_wide(&expanded))?;
+            let mapped_override = mapping.virtual_to_uid(OsString::from_wide(&expanded))?;
 
             info!("override" = %mapped_override);
 
@@ -250,7 +252,7 @@ fn hook_set_path(
 
         let expanded = DlDeviceManager::lock(device_manager).expand_path(path.as_slice());
 
-        let mapped_override = mapping.vfs_override(OsString::from_wide(&expanded))?;
+        let mapped_override = mapping.virtual_to_uid(OsString::from_wide(&expanded))?;
 
         let mut path = path.clone();
 
@@ -311,8 +313,7 @@ fn hook_mount_ebl(attach_config: Arc<AttachConfig>, exe: Executable) -> Result<(
         // Write a temporary file with the size of a single block and have the
         // game decrypt it, which creates an EblFileDevice and lets us read
         // the original file size.
-        let mut stub_file = NamedTempFile::new_in(cache_path.as_ref())?;
-
+        let mut stub_file = NamedTempFile::new().with_context(|| "creating stub file")?;
         stub_file.write_all(&original[..Ord::min(pub_key_size, original.len())])?;
 
         let snap = device_manager.snapshot()?;
@@ -538,7 +539,7 @@ fn try_hook_wwise(
                 unsafe {
                     trampoline(
                         p1,
-                        mapped_override.into(),
+                        mapped_override.as_pcwstr(),
                         AkOpenMode::Read as _,
                         p4,
                         p5,
