@@ -1,0 +1,72 @@
+name: Build (Unsigned)
+
+on:
+  workflow_dispatch:
+
+env:
+  RUSTC_BOOTSTRAP: 1
+
+jobs:
+  build:
+    name: Build Binaries and Distributions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9 # v2.14.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup Windows toolchain
+        uses: ./.github/actions/setup-windows-toolchain
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc,x86_64-unknown-linux-gnu
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pandoc
+
+      - name: Build binaries
+        run: make -j4 out/me3.exe out/me3-launcher.exe out/me3_mod_host.dll out/me3
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+
+      - name: Create distributions and installer
+        run: make all
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: me3-distributions
+          path: |
+            out/me3-linux-amd64.tar.gz
+            out/me3-windows-amd64.zip
+            out/me3_installer.exe
+            installer.sh
+          retention-days: 30
+
+      - name: Create release (if tagged)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            out/me3-linux-amd64.tar.gz
+            out/me3-windows-amd64.zip
+            out/me3_installer.exe
+            installer.sh
+            out/me3-debug-info.zip
+          draft: true
